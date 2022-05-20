@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="en">
+	
+<!-- Mirrored from www.clicktorelease.com/code/codevember-2017/plasma-waves/ by HTTrack Website Copier/3.x [XR&CO'2014], Fri, 20 May 2022 10:28:33 GMT -->
+<head>
+		<title>Plasma Waves - Codevember 2017</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+
+		<script src="../../../cdn-cgi/apps/head/EQZCnk4gCeNwUQsZ03sLJaa105M.js"></script><link rel="stylesheet" type="text/css" href="../css/styles.css" media="screen" />
+		<link href="https://fonts.googleapis.com/css?family=Roboto|Roboto+Slab" rel="stylesheet">
+
+	</head>
+	<body>
+
+		<div id="container"></div>
+		<div id="info" >
+			<p><a href="https://www.clicktorelease.com/code/codevember-2017/sphere-carving" >Previous</a> | <a href="https://www.clicktorelease.com/code/codevember-2017/chromeography" >Next</a></p>
+			<h1>6. Plasma Waves</h1>
+			<p>Experiment with sorting particles, set up with curl noise, and disturbed with another curl noise.</p>
+			<p><a href="#" id="generate" >Click here to generate a new one</a></p>
+			<p><b>Click or tap and drag</b> to move the camera, <b>scroll or zoom with two fingers</b> to zoom in and out.</p>			<p id="moreDetails"><b>More details...</b></p>
+		</div>
+		<div id="details" class="hidden">
+			<div class="content" >
+				<h1>Details</h1>
+				<p>Experiment with sorting particles, set up with curl noise, and disturbed with another curl noise.</p>
+				<p>Originally was going to be smoke particles, from <a href="http://developer.download.nvidia.com/assets/cuda/files/smokeParticles.pdf" >Volumetric Particle
+Shadows</a>, but it ended up being this.</p>
+				<p>Built with <a href="threejs.html">three.js</a> and Perlin noise from <a href="https://github.com/josephg/noisejs" rel="external" >noisejs</a>.</p>
+				<p>Code available on <a href="https://github.com/spite/codevember-2017/tree/master/plasma-waves" >GitHub</a>.</p>
+				<a href="#" id="close-details">Close</a>
+			</div>
+		</div>
+
+		<script src="../js/Common.js"></script>
+		<script src="../js/three.min.js"></script>
+		<script src="../js/OrbitControls.js"></script>
+		<script src="../js/perlin.js"></script>
+		<script src="../js/Maf.js"></script>
+		<script src="../js/isMobile.min.js"></script>
+
+<script type="x-shader/x-vertex" id="ortho-vs" >
+precision highp float;
+attribute vec3 position;
+attribute vec2 uv;
+uniform mat4 modelViewMatrix;
+uniform mat4 projectionMatrix;
+varying vec2 vUv;
+void main() {
+	vUv = uv;
+	gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1. );
+}
+</script>
+
+
+<script id="backdrop-fs" type="x-shader/x-fragment">
+precision highp float;
+
+varying vec2 vUv;
+
+uniform vec3 top;
+uniform vec3 bottom;
+
+float random(vec2 n, float offset ){
+	return .5 - fract(sin(dot(n.xy + vec2( offset, 0. ), vec2(12.9898, 78.233)))* 43758.5453);
+}
+
+void main() {
+	gl_FragColor = vec4( mix( vec3(40.)/255., vec3(20.)/255., vUv.y ), 1.);
+ 	gl_FragColor += vec4( vec3( .01 * random( vUv, 0. ) ), 1. );
+}
+</script>
+
+<script id="particle-vs" type="x-shader/x-vertex">
+precision highp float;
+
+attribute vec3 position;
+attribute float vertexId;
+attribute float size;
+
+uniform mat4 modelMatrix;
+uniform mat4 modelViewMatrix;
+uniform mat4 projectionMatrix;
+uniform vec3 vertices[ 3 ];
+uniform vec2 uvs[ 3 ];
+uniform vec3 lightPosition;
+
+uniform vec2 dimensions;
+uniform float scale;
+uniform vec3 color;
+
+varying vec2 vUv;
+varying vec3 vColor;
+varying float vSize;
+
+const float PI = 3.14159265359;
+
+vec3 hsv2rgb(vec3 c) {
+  vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+  vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+  return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+void main() {
+
+	int id = int( vertexId );
+	vec3 v = vertices[ id ];
+	vec4 p = modelViewMatrix * vec4( position, 1. );
+	p.xyz += scale * v * size;
+
+	vSize = size;
+	vUv = uvs[ id ];
+	float l = 1. - ( length( lightPosition - position.xyz ) -.8 ) / 1.;
+	vColor = hsv2rgb( vec3( .5 * size, 1., 1. ) );//vec3( 2. * l );
+
+	gl_Position = projectionMatrix * p;
+
+}
+
+</script>
+
+<script id="particle-fs" type="x-shader/x-vertex">
+precision highp float;
+
+varying vec2 vUv;
+varying vec3 vColor;
+varying float vSize;
+
+uniform float opacity;
+
+void main() {
+
+	vec2 barycenter = vec2( .5, .6666 );
+	float d = smoothstep( .5, .55, 1. - 2. * length( vUv - barycenter ) );
+	float a = 1. - smoothstep( .9, 1., 5. * length( vUv - barycenter ) );
+	//if( d <= 0. || a * opacity <= 0. ) discard;
+	gl_FragColor = vec4( vColor, .5 * d * opacity );
+	gl_FragColor.a = opacity * ( 1. - 3.5 * length( vUv - barycenter ) );
+
+}
+
+</script>
+
+<script>
+
+'use strict';
+
+var container, renderer, camera, controls, scene;
+var mesh;
+
+var helper;
+
+var container = document.getElementById( 'container' );
+
+var particles = [];
+var base = [];
+var lightPosition = new THREE.Vector3( 1,1,1);
+var NUM_POINTS = isMobile.any?10000:25000;
+
+var halfAngle = new THREE.Vector3();
+var tmpCamPos = new THREE.Vector3();
+var tmpLightPos = new THREE.Vector3();
+var tmpVector = new THREE.Vector3();
+var numSlices = 10;
+var meshes = [];
+var batchSize = NUM_POINTS / numSlices;
+var backdrop;
+
+var funcs = [
+	[74.51214174553195, 76.46362999277221, 70.36038981251878, -67.14031243600527, -17.613196891616084, -39.83080533905654],
+	[-67.25713379627214,-30.990234719283237,50.387967864983665,-42.52547938083211,94.51583454649355,-65.69789717406226],
+	[-53.380410001610954,84.45779391157623,74.83172310252226,-99.67348110585826,-75.63953402188895,-51.75312432560659]
+];
+
+function createObject() {
+
+	var t = new THREE.Vector4();
+	/*for( var j = 0; j < NUM_POINTS; j++ ) {
+		t.set( .5 - Math.random(), .5 - Math.random(), .5 - Math.random(), .5 + 2 * Math.random() );
+		t.set( .5 - Math.random(), .5 - Math.random(), .5 - Math.random(), .5 + 2 * Math.random() );
+		particles.push( t.clone() );
+	}*/
+	var l = 20;
+	var r = .5;
+	var ptr = 0;
+	for( var j = 0; j < NUM_POINTS; j+= l ) {
+		var p = new THREE.Vector3( r * ( .5 - Math.random() ), r* ( .5 - Math.random() ), r* ( .5 - Math.random() ) );
+		for( var k = 0; k < l; k++ ) {
+			var inc = noiseFunc( p.clone().multiplyScalar( .5 ) ).normalize().multiplyScalar( .5 );
+			p.add( inc );
+			var s = 2 * ( 1. - ( k / l ) );
+			var s = .1 * ( 2 * l - k );
+			t.set( p.x, p.y, p.z, s );
+			particles[ ptr ].copy( t );
+			base[ptr].copy(t);
+			ptr++;
+		}
+	}
+
+}
+
+function initScene() {
+
+	var t = new THREE.Vector4();
+	/*for( var j = 0; j < NUM_POINTS; j++ ) {
+		t.set( .5 - Math.random(), .5 - Math.random(), .5 - Math.random(), .5 + 2 * Math.random() );
+		t.set( .5 - Math.random(), .5 - Math.random(), .5 - Math.random(), .5 + 2 * Math.random() );
+		particles.push( t.clone() );
+	}*/
+	var l = 20;
+	var r= .5;
+	for( var j = 0; j < NUM_POINTS; j+= l ) {
+		var p = new THREE.Vector3( r * ( .5 - Math.random() ), r* ( .5 - Math.random() ), r* ( .5 - Math.random() ) );
+		for( var k = 0; k < l; k++ ) {
+			particles.push( t.clone() );
+			base.push( t.clone() );
+		}
+	}
+
+	createObject();
+
+	var particleMaterial = new THREE.RawShaderMaterial( {
+		uniforms:{
+			lightPosition: { type: 'v3', value: lightPosition },
+			scale: { type: 'f', value: .05 },
+			opacity: { type: 'f', value: .1 },
+			color: { type: 'c', value: new THREE.Color( 0x0 ) },
+			vertices: { type: 'v3v', value: [
+				new THREE.Vector3( -1, -1, 0 ),
+				new THREE.Vector3(  1, -1, 0 ),
+				new THREE.Vector3(  0,  1, 0 )
+			]},
+			uvs: { type: 'v2v', value: [
+				new THREE.Vector3( 0, 1 ),
+				new THREE.Vector3( 1, 1 ),
+				new THREE.Vector3( .5, 0 )
+			]}
+		},
+		vertexShader: document.getElementById( 'particle-vs' ).textContent,
+		fragmentShader: document.getElementById( 'particle-fs' ).textContent,
+		depthTest: false,
+		depthWrite: false,
+		transparent: true,
+	} );
+
+
+	for( var j = 0; j < numSlices; j++ ){
+
+		var geometry = new THREE.BufferGeometry();
+		geometry.addAttribute( 'position', new THREE.BufferAttribute( new Float32Array( batchSize * 9 ), 3 ) );
+		geometry.addAttribute( 'vertexId', new THREE.BufferAttribute( new Float32Array( batchSize * 3 ), 1 ) );
+		geometry.addAttribute( 'size', new THREE.BufferAttribute( new Float32Array( batchSize * 3 ), 1 ) );
+
+		geometry.getAttribute( 'position' ).dynamic = true;
+		geometry.getAttribute( 'size' ).dynamic = true;
+
+		for( var k = 0; k < batchSize; k++ ) {
+			var v = particles[ j * batchSize + k ]
+			geometry.attributes.position.array[ k * 9 + 0 ] = v.x;
+			geometry.attributes.position.array[ k * 9 + 1 ] = v.y;
+			geometry.attributes.position.array[ k * 9 + 2 ] = v.z;
+
+			geometry.attributes.position.array[ k * 9 + 3 ] = v.x;
+			geometry.attributes.position.array[ k * 9 + 4 ] = v.y;
+			geometry.attributes.position.array[ k * 9 + 5 ] = v.z;
+
+			geometry.attributes.position.array[ k * 9 + 6 ] = v.x;
+			geometry.attributes.position.array[ k * 9 + 7 ] = v.y;
+			geometry.attributes.position.array[ k * 9 + 8 ] = v.z;
+
+			geometry.attributes.vertexId.array[ k * 3 + 0 ] = 0;
+			geometry.attributes.vertexId.array[ k * 3 + 1 ] = 1;
+			geometry.attributes.vertexId.array[ k * 3 + 2 ] = 2;
+
+			geometry.attributes.size.array[ k * 3 + 0 ] = 1;
+			geometry.attributes.size.array[ k * 3 + 1 ] = 1;
+			geometry.attributes.size.array[ k * 3 + 2 ] = 1;
+		}
+		var points = new THREE.Mesh( geometry, particleMaterial );
+		scene.add( points );
+		meshes.push( points );
+	}
+
+	var light = new THREE.Mesh(
+	    new THREE.BoxBufferGeometry(.1,.1,.1),
+	    new THREE.MeshBasicMaterial()
+	);
+	light.position.copy( lightPosition );
+	//scene.add( light );
+
+	backdrop = new THREE.Mesh(
+		new THREE.IcosahedronGeometry(3,4),
+		new THREE.RawShaderMaterial( {
+		uniforms: {
+				top: { type: 'c', value: new THREE.Color().setHex(0xe28929),
+				bottom: { type: 'c', value: new THREE.Color().setHex(0xff00ff)}}
+			},
+			vertexShader: document.getElementById('ortho-vs').textContent,
+			fragmentShader: document.getElementById('backdrop-fs').textContent,
+			depthWrite: false,
+			side: THREE.BackSide
+		} ),
+	)
+	scene.add( backdrop );
+
+}
+
+function noiseFunc0( v ){
+
+	var s  = noise.simplex3( v.x, v.y, v.z );
+	var s1 = noise.simplex3( v.y - 19.1, v.z + 33.4, v.x + 47.2 );
+	var s2 = noise.simplex3( v.z + 74.2, v.x - 124.5, v.y + 99.4 );
+	return new THREE.Vector3( s , s1 , s2 );
+
+}
+
+function generateNoiseFunction(preset) {
+
+	var a = Maf.randomInRange( -100, 100 );
+	var b = Maf.randomInRange( -100, 100 );
+	var c = Maf.randomInRange( -100, 100 );
+
+	var d = Maf.randomInRange( -100, 100 );
+	var e = Maf.randomInRange( -100, 100 );
+	var f = Maf.randomInRange( -100, 100 );
+
+	if( preset ) {
+		a = preset[ 0 ]; b = preset[ 1 ]; c = preset[ 2 ];
+		d = preset[ 3 ]; e = preset[ 4 ]; f = preset[ 5 ];
+	}
+
+	console.log(a,b,c,d,e,f);
+
+	return function( v, t ) {
+
+		t = t || 0;
+		var s  = noise.simplex3( v.x + t, v.y, v.z );
+		var s1 = noise.simplex3( v.y + a, v.z + b + t, v.x + c );
+		var s2 = noise.simplex3( v.z + c, v.x + d, v.y + f + t );
+		return new THREE.Vector3( s , s1 , s2 );
+
+	}
+
+}
+
+var noiseFunc = generateNoiseFunction( funcs[ Math.floor( Math.random() * funcs.length ) ] );
+
+function init() {
+
+	container = document.getElementById( 'container' );
+
+	scene = new THREE.Scene();
+
+	camera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, .1, 10000 );
+	camera.target = new THREE.Vector3( 0, 0, 0 );
+	camera.position.set( 0, 0, 4.3 );
+	camera.lookAt( camera.target );
+	scene.add( camera );
+
+	renderer = new THREE.WebGLRenderer( { antialias: true, preserveDrawingBuffer: true } );
+	renderer.setPixelRatio( window.devicePixelRatio );
+	renderer.setClearColor( 0, 1 );
+	container.appendChild( renderer.domElement );
+
+	addCommonUI(renderer.domElement);
+
+	renderer.shadowMap.enabled = true;
+	renderer.shadowMap.type = THREE.PCFShadowMap;
+	renderer.sortObjects = false;
+
+	controls = new THREE.OrbitControls( camera, renderer.domElement );
+
+	initScene();
+	onWindowResized();
+
+	document.getElementById( 'generate' ).addEventListener( 'click', function() {
+		noiseFunc = generateNoiseFunction();
+		createObject();
+	});
+
+	window.addEventListener( 'resize', onWindowResized );
+
+	animate();
+
+}
+
+function onWindowResized( event ) {
+
+	var w = container.clientWidth;
+	var h = container.clientHeight;
+
+	renderer.setSize( w, h );
+	camera.aspect = w / h;
+	camera.updateProjectionMatrix();
+
+}
+
+var dot = function() {
+
+	var tmpVector = new THREE.Vector3();
+
+	return function( a, b ) {
+		tmpVector.copy( a );
+		return tmpVector.dot( b );
+	}
+
+}();
+
+function sortParticles() {
+
+	tmpCamPos.copy( camera.position ).normalize();
+	tmpLightPos.copy( lightPosition ).normalize();
+
+	var renderOrder = 0;
+	if( dot( tmpCamPos, tmpLightPos ) > 0 ) {
+		renderOrder = 0;
+		halfAngle.copy( tmpCamPos ).add( tmpLightPos ).normalize();
+	} else {
+		renderOrder = 1;
+		halfAngle.copy( tmpCamPos ).multiplyScalar( -1 ).add( tmpLightPos ).normalize();
+	}
+
+	var t = .0001 * performance.now();
+	particles.forEach( function( p, id ) {
+		var b = base[ id ];
+		particles[ id ].copy( b );
+		var s = .25;
+		var inc = noiseFunc( new THREE.Vector3( s * b.x, s * b.y, s * b.z ), t );
+		particles[ id ].add( new THREE.Vector4( inc.x, inc.y, inc.z, 0 ) );
+	});
+
+	var sorted = [];
+	particles.forEach( function( p, id ) {
+		tmpVector.copy( p );
+		var d = dot( tmpVector, halfAngle );
+		sorted.push( { id: id, dot: d } );
+	})
+
+	sorted.sort( function( a,b ) {
+		return a.dot - b.dot;
+	})
+
+	var geometry;
+	var v;
+	var ptr;
+	var ptr2;
+	for( var j = 0; j < numSlices; j++ ) {
+		geometry = meshes[ j ].geometry;
+		for( var k = 0; k < batchSize; k++ ) {
+			ptr = j * batchSize + k;
+			if( renderOrder === 0 ) ptr2 = sorted[ ptr ].id;
+			else ptr2 = sorted[ sorted.length - 1 - ptr ].id;
+			v = particles[ ptr2 ];
+			geometry.attributes.position.array[ k * 9 + 0 ] = v.x;
+			geometry.attributes.position.array[ k * 9 + 1 ] = v.y;
+			geometry.attributes.position.array[ k * 9 + 2 ] = v.z;
+
+			geometry.attributes.position.array[ k * 9 + 3 ] = v.x;
+			geometry.attributes.position.array[ k * 9 + 4 ] = v.y;
+			geometry.attributes.position.array[ k * 9 + 5 ] = v.z;
+
+			geometry.attributes.position.array[ k * 9 + 6 ] = v.x;
+			geometry.attributes.position.array[ k * 9 + 7 ] = v.y;
+			geometry.attributes.position.array[ k * 9 + 8 ] = v.z;
+
+			geometry.attributes.size.array[ k * 3 + 0 ] = v.w;
+			geometry.attributes.size.array[ k * 3 + 1 ] = v.w;
+			geometry.attributes.size.array[ k * 3 + 2 ] = v.w;
+		}
+		geometry.attributes.position.needsUpdate = true;
+		geometry.attributes.size.needsUpdate = true;
+	}
+
+}
+
+function animate() {
+
+	requestAnimationFrame( animate );
+
+	controls.update();
+
+	backdrop.position.copy( camera.position );
+	sortParticles();
+
+	renderer.render( scene, camera );
+
+}
+
+window.addEventListener( 'load', init );
+
+</script>
+
+	</body>
+
+<!-- Mirrored from www.clicktorelease.com/code/codevember-2017/plasma-waves/ by HTTrack Website Copier/3.x [XR&CO'2014], Fri, 20 May 2022 10:28:39 GMT -->
+</html>
